@@ -62,7 +62,7 @@ static State* solve() {
   while(queueHead) {
     s = pop();
 
-		// If we've reached the goal, check to see if the weight is 30
+    // If we've reached the goal, check to see if the weight is 30
 
     if(s->x == 3 && s->y == 0) {
       if(s->weight == 30) {
