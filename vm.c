@@ -22,6 +22,14 @@ typedef struct{
   bool halt;
 } VM;
 
+//#define STATS
+#ifdef STATS
+#define PAGE_SIZE 256
+static int maxStack;
+static bool pageMap[MEM_SIZE / PAGE_SIZE];
+static int instructionCount;
+#endif
+
 typedef enum {
   OP_HALT   = 0,
   OP_SET    = 1,
@@ -134,6 +142,11 @@ static void push(VM* vm, Word w) {
     fatalError("Stack overflow");
   }
   vm->stack[vm->sp++] = w;
+#ifdef STATS
+  if(vm->sp > maxStack) {
+    maxStack = vm->sp;
+  }
+#endif
 }
 
 static Word pop(VM* vm) {
@@ -166,7 +179,25 @@ static void trace(VM* vm, const char* op, int numOperands) {
   printf("\n");
 }
 
+#ifdef STATS
+static void printStats() {
+  int modifiedPages = 0;
+  for(int i = 0; i < MEM_SIZE / PAGE_SIZE; i++) {
+    if(pageMap[i]) {
+      modifiedPages++;
+    }
+  }
+  printf("Max Stack: %d Modified Pages: %d Instructions: %d\n",
+      maxStack,
+      modifiedPages,
+      instructionCount);
+}
+#endif
+
 static void step(VM* vm) {
+#ifdef STATS
+  instructionCount++;
+#endif
   OP op = fetchWord(vm);
   Word a, b, c;
   switch(op) {
@@ -278,6 +309,9 @@ static void step(VM* vm) {
       a = fetchVal(vm);               
       b = fetchVal(vm);
       vm->mem[a] = b;
+#ifdef STATS
+      pageMap[a/PAGE_SIZE] = true;
+#endif
       break;
     case OP_CALL:
       TRACE("OP_CALL", 1);
@@ -302,13 +336,21 @@ static void step(VM* vm) {
     case OP_IN:
       TRACE("OP_IN", 1);
       a = fetchReg(vm);
-      b = getchar() & 32767;
+      b = getchar();
+      if(feof(stdin)) {
+        vm->halt = true;
+        break;
+      }
       vm->reg[a] = b;
       if(b == '\n') {
         // We write the complete game state to save.dat after line
         // of user input. Copy this file to load.dat to have the game
         // load it on startup.
         save(vm);
+#ifdef STATS
+        printStats();
+        instructionCount = 0;
+#endif
       }
       break;
     case OP_NOP:
@@ -317,6 +359,26 @@ static void step(VM* vm) {
     default:
       fatalError("Unknown opcode %04x", op);
       break;
+  }
+}
+
+static void patchTeleporter(VM* vm) {
+
+  // Patch the instruction at 1561. It checks to ensure that R7 is non-zero,
+  // and if so, the teleporter code is skipped. Instead, we set R7 to the
+  // correct value, as calculated by tel.cpp.
+  // old: 1561: OP_JF R7 15FB
+  // new: 1561: OP_SET R7 6486
+  vm->mem[0x1561] = OP_SET;
+  vm->mem[0x1563] = 0x6486;
+
+  // Remove the call to the teleporter confirmation routine, and the check
+  // that it returns the correct value (6).
+  // 1587: OP_CALL 17A1
+  // 1589: OP_EQ R1 R0 0006
+  // 158D: OP_JF R1 15E1
+  for(int addr = 0x1587; addr <= 0x158F; addr++) {
+    vm->mem[addr] = OP_NOP;
   }
 }
 
@@ -330,15 +392,7 @@ int main() {
   }
 
   load(&vm);
-
-  // Patch for the teleporter puzzle
-  /*
-  vm.reg[7] = 25734;
-  for(Word addr = 0x1587; addr <= 0x158F; addr++) {
-      vm.mem[addr] = OP_NOP;
-  }
-  */
-
+  patchTeleporter(&vm);
   while(!vm.halt) {
     step(&vm);
   }
