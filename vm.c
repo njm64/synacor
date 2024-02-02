@@ -269,6 +269,7 @@ static void step(VM* vm) {
       a = fetchReg(vm);
       b = fetchVal(vm);
       c = fetchVal(vm);
+     // printf("%04X Multiplying by %d\n", vm->ip, c);
       vm->reg[a] = (b * c) % 0x8000;
       break;
     case OP_MOD:
@@ -382,6 +383,18 @@ static void patchTeleporter(VM* vm) {
   }
 }
 
+static void decryptData(VM* vm) {
+  // Decrypt the encrypted section of the byte code.
+  // This original routine is located at 06D1.
+  for(Word addr = 0x17CA; addr < 0x7505; addr++) {
+    vm->mem[addr] = vm->mem[addr] ^ (addr * addr) ^ 0x4154;
+  }
+
+  // Patch out the call to the original decrypt routine
+  vm->mem[0x038B] = OP_NOP;
+  vm->mem[0x038C] = OP_NOP;
+}
+
 int main() {
   VM vm;
   memset(&vm, 0, sizeof(vm));
@@ -393,6 +406,7 @@ int main() {
 
   load(&vm);
   patchTeleporter(&vm);
+//  decryptData(&vm);
   while(!vm.halt) {
     step(&vm);
   }
