@@ -1,6 +1,7 @@
-all: vm tel orb
+all: vm tel orb dis
 
-vm: vm.o
+vm: vm.o common.o
+dis: dis.o common.o
 orb: orb.o
 
 tel: tel.cpp
