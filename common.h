@@ -40,8 +40,9 @@ typedef struct {
   const char* name;
 } OpDef;
 
-bool    read(const char* filename, Memory m);
-void    decrypt(Memory m);
+bool    memRead(const char* filename, Memory m);
+bool    memWrite(const char* filename, Memory m);
+void    memDecrypt(Memory m);
 OpDef*  getOpDef(Word opcode);
 int     disasm(Memory mem, Word ip);
 

@@ -4,23 +4,17 @@
 #include <assert.h>
 #include <stdarg.h>
 #include <stdlib.h>
+#include "common.h"
 
-typedef unsigned short Word;
-
-#define MEM_SIZE    32768
-#define REG_COUNT   8
-#define STACK_SIZE  65536
-
-//#define TRACE(NAME, COUNT) trace(vm, NAME, COUNT)
-#define TRACE(NAME, COUNT)
-
-typedef struct{
-  Word mem[MEM_SIZE];
+typedef struct {
+  Memory mem;
   Word reg[REG_COUNT];
   Word stack[STACK_SIZE];
   size_t sp, ip;
   bool halt;
 } VM;
+
+bool debug;
 
 //#define STATS
 #ifdef STATS
@@ -29,55 +23,6 @@ static int maxStack;
 static bool pageMap[MEM_SIZE / PAGE_SIZE];
 static int instructionCount;
 #endif
-
-typedef enum {
-  OP_HALT   = 0,
-  OP_SET    = 1,
-  OP_PUSH   = 2,
-  OP_POP    = 3,
-  OP_EQ     = 4,
-  OP_GT     = 5,
-  OP_JMP    = 6,
-  OP_JT     = 7,
-  OP_JF     = 8,
-  OP_ADD    = 9,
-  OP_MULT   = 10,
-  OP_MOD    = 11,
-  OP_AND    = 12,
-  OP_OR     = 13,
-  OP_NOT    = 14,
-  OP_RMEM   = 15,
-  OP_WMEM   = 16,
-  OP_CALL   = 17,
-  OP_RET    = 18,
-  OP_OUT    = 19,
-  OP_IN     = 20,
-  OP_NOP    = 21  
-} OP;
-
-static bool readProgram(const char* filename, VM* vm) {
-  FILE* f = fopen(filename, "rb");
-  if(!f) {
-    return false;
-  }
- 
-  bool done = false, err = false;
-  for(int addr = 0; !done && !err; addr++) {
-    int lo = fgetc(f);
-    int hi = fgetc(f);
-    if(hi >= 0 && addr < MEM_SIZE) {
-      vm->mem[addr] = (hi << 8) | lo;
-    } else if(feof(f)) {
-      done = true;
-    } else {
-      printf("hi %d addr %d\n", (int)hi, (int)addr);
-      err = true;
-    }
-  }
-
-  fclose(f);
-  return !err;
-}
 
 static void save(VM* vm) {
   FILE* f = fopen("save.dat", "wb");
@@ -94,6 +39,34 @@ static void load(VM* vm) {
     fclose(f);
   }
 }
+
+static void hexDump(FILE* f, Word* data, int size) {
+  int lineSize = 16;
+  for(int i = 0; i < size; i += lineSize) {
+    fprintf(f, "%04X:", i);
+    for(int j = 0; j < lineSize && i + j < size; j++) {
+      fprintf(f, " %04X", data[i+j]);
+    }
+    fprintf(f, "\n");
+  }
+}
+
+static void dumpDebug(VM* vm) {
+  FILE* f = fopen("dump.txt", "w");
+  fprintf(f, "IP: %04X SP: %04X\n", (Word)vm->ip, (Word)vm->sp);
+  for(int i = 0; i < REG_COUNT; i++) {
+    fprintf(f, "R%d: %04X ", i, vm->reg[i]);
+  }
+  fprintf(f, "\n");
+
+  fprintf(f, "Stack:\n");
+  hexDump(f, vm->stack, vm->sp);
+
+  fprintf(f, "Memory:\n");
+  hexDump(f, vm->mem, 8192);
+  fclose(f);
+}
+
 
 static void fatalError(const char* fmt, ...) {
   va_list v;
@@ -162,23 +135,6 @@ static void printRegisters(VM* vm) {
   }
 }
 
-static void trace(VM* vm, const char* op, int numOperands) {
-  Word ip = vm->ip - 1;
-//  printRegisters(vm);
-  printf("%04X: %s", ip, op);
-  for(int i = 0; i < numOperands; i++) {
-    Word v = vm->mem[vm->ip + i];
-    if(v < MEM_SIZE) {
-      printf(" %04X", v);
-    } else if(v < MEM_SIZE + REG_COUNT) {
-      printf(" R%d", v - MEM_SIZE);
-    } else {
-      printf(" INVALID");
-    }
-  }
-  printf("\n");
-}
-
 #ifdef STATS
 static void printStats() {
   int modifiedPages = 0;
@@ -195,6 +151,12 @@ static void printStats() {
 #endif
 
 static void step(VM* vm) {
+  if(debug) {
+    printRegisters(vm);
+    printf("\n");
+    printf("\n");
+    disasm(vm->mem, vm->ip);
+  }
 #ifdef STATS
   instructionCount++;
 #endif
@@ -202,47 +164,39 @@ static void step(VM* vm) {
   Word a, b, c;
   switch(op) {
     case OP_HALT:
-      TRACE("OP_HALT", 0);
       vm->halt = true;
       break;
     case OP_SET:
-      TRACE("OP_SET", 2);
       a = fetchReg(vm);
       b = fetchVal(vm);
       vm->reg[a] = b;
       break;
     case OP_PUSH:
-      TRACE("OP_PUSH", 1);
       a = fetchVal(vm);
       push(vm, a);
       break;
     case OP_POP:
-      TRACE("OP_POP", 1);
       a = fetchReg(vm);
       b = pop(vm);
       vm->reg[a] = b;
       break;
     case OP_EQ:
-      TRACE("OP_EQ", 3);
       a = fetchReg(vm);
       b = fetchVal(vm);
       c = fetchVal(vm);
       vm->reg[a] = b == c;
       break;
     case OP_GT:
-      TRACE("OP_GT", 3);
       a = fetchReg(vm);
       b = fetchVal(vm);
       c = fetchVal(vm);
       vm->reg[a] = b > c;
       break;
     case OP_JMP:
-      TRACE("OP_JMP", 1);
       a = fetchVal(vm);
       jump(vm, a);
       break;
     case OP_JT:
-      TRACE("OP_JT", 2);
       a = fetchVal(vm);
       b = fetchVal(vm);
       if(a) {
@@ -250,7 +204,6 @@ static void step(VM* vm) {
       }
       break;
     case OP_JF:
-      TRACE("OP_JF", 2);
       a = fetchVal(vm);
       b = fetchVal(vm);
       if(!a) {
@@ -258,70 +211,66 @@ static void step(VM* vm) {
       }
       break;
     case OP_ADD:
-      TRACE("OP_ADD", 3);
       a = fetchReg(vm);
       b = fetchVal(vm);
       c = fetchVal(vm);
       vm->reg[a] = (b + c) % 0x8000;
       break;
     case OP_MULT:
-      TRACE("OP_MULT", 3);
       a = fetchReg(vm);
       b = fetchVal(vm);
       c = fetchVal(vm);
-     // printf("%04X Multiplying by %d\n", vm->ip, c);
       vm->reg[a] = (b * c) % 0x8000;
       break;
     case OP_MOD:
-      TRACE("OP_MOD", 3);
       a = fetchReg(vm);
       b = fetchVal(vm);
       c = fetchVal(vm);
       vm->reg[a] = b % c;
       break;
     case OP_AND:
-      TRACE("OP_AND", 3);
       a = fetchReg(vm);
       b = fetchVal(vm);
       c = fetchVal(vm);
       vm->reg[a] = b & c;
       break;
     case OP_OR:
-      TRACE("OP_OR", 3);
       a = fetchReg(vm);
       b = fetchVal(vm);
       c = fetchVal(vm);
       vm->reg[a] = b | c;
       break;
     case OP_NOT:
-      TRACE("OP_NOT", 2);
       a = fetchReg(vm);
       b = fetchVal(vm);
       vm->reg[a] = (~b) & 0x7FFF;
       break;
     case OP_RMEM:
-      TRACE("OP_RMEM", 2);
       a = fetchReg(vm);
       b = fetchVal(vm);
-      vm->reg[a] = vm->mem[b];
+      if(b >= 16384) {
+       // printf("%04X: Trying to read %04X\n", (Word)vm->ip - 3, b);
+      }
+      vm->reg[a] = vm->mem[b] & 0x7FFF;
       break;
     case OP_WMEM:
-      TRACE("OP_WMEM", 2);
       a = fetchVal(vm);               
       b = fetchVal(vm);
+      if(a >= 16384) {
+       // printf("%04X: Trying to write %04X\n", (Word)vm->ip - 3, a);
+      }
       vm->mem[a] = b;
+      printf("%04X: Writing %04X to %04X\n", (Word)vm->ip - 3, b, a);
 #ifdef STATS
       pageMap[a/PAGE_SIZE] = true;
 #endif
       break;
     case OP_CALL:
-      TRACE("OP_CALL", 1);
       a = fetchVal(vm);
       push(vm, vm->ip);
       jump(vm, a);
       break;
     case OP_RET:
-      TRACE("OP_RET", 0);
       if(vm->sp == 0) {
         vm->halt = true;
       } else {
@@ -332,10 +281,10 @@ static void step(VM* vm) {
     case OP_OUT:
       //TRACE("OP_OUT", 1);
       a = fetchVal(vm);
+      printf("{%02X}", a);
       putchar(a);
       break;
     case OP_IN:
-      TRACE("OP_IN", 1);
       a = fetchReg(vm);
       b = getchar();
       if(feof(stdin)) {
@@ -355,7 +304,6 @@ static void step(VM* vm) {
       }
       break;
     case OP_NOP:
-      TRACE("OP_NOP", 0);
       break;
     default:
       fatalError("Unknown opcode %04x", op);
@@ -383,31 +331,28 @@ static void patchTeleporter(VM* vm) {
   }
 }
 
-static void decryptData(VM* vm) {
-  // Decrypt the encrypted section of the byte code.
-  // This original routine is located at 06D1.
-  for(Word addr = 0x17CA; addr < 0x7505; addr++) {
-    vm->mem[addr] = vm->mem[addr] ^ (addr * addr) ^ 0x4154;
-  }
-
-  // Patch out the call to the original decrypt routine
-  vm->mem[0x038B] = OP_NOP;
-  vm->mem[0x038C] = OP_NOP;
-}
-
 int main() {
   VM vm;
   memset(&vm, 0, sizeof(vm));
 
-  if(!readProgram("challenge.bin", &vm)) {
+  if(!memRead("challenge.bin", vm.mem)) {
     printf("Error reading challenge.bin\n");
     return 1;
   }
 
   load(&vm);
-  patchTeleporter(&vm);
-//  decryptData(&vm);
+//  patchTeleporter(&vm);
+//  memDecrypt(vm.mem);
   while(!vm.halt) {
+ /*   if(vm.ip == 1000) {
+      debug = true;
+    }
+    if(vm.ip == 0x043e) {
+      dumpDebug(&vm);
+      break;
+    }
+    */
+
     step(&vm);
   }
 

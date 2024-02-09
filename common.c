@@ -28,7 +28,7 @@ static OpDef opDefs[] = {
   0, "nop",
 };
 
-bool read(const char* filename, Memory mem) {
+bool memRead(const char* filename, Memory mem) {
   FILE* f = fopen(filename, "rb");
   if(!f) {
     return false;
@@ -51,11 +51,28 @@ bool read(const char* filename, Memory mem) {
   return !err;
 }
 
-void decrypt(Memory mem) {
+bool memWrite(const char* filename, Memory mem) {
+  FILE* f = fopen(filename, "wb");
+  if(!f) {
+    return false;
+  }
+
+  for(int i = 0; i < MEM_SIZE; i++) {
+    fputc(mem[i] & 0xff, f);
+    fputc(mem[i] >> 8, f);
+  }
+
+  fclose(f);
+  return true;
+}
+
+void memDecrypt(Memory mem) {
   // Decrypt the encrypted section of the byte code.
   // This original routine is located at 06D1.
   for(Word addr = 0x17CA; addr < 0x7505; addr++) {
+    Word old = mem[addr];
     mem[addr] = mem[addr] ^ (addr * addr) ^ 0x4154;
+    printf("%04X: %04X -> %04X\n", addr, old, mem[addr]);
   }
 
   // Patch out the call to the original decrypt routine
