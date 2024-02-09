@@ -1,3 +1,6 @@
+// Dump a VICE snapshot for debugging. 
+// Output format matches dumpDebug in vm.c
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdbool.h>

@@ -1,10 +1,10 @@
 #include <stdio.h>
-#include "common.h"
+#include "../vm/common.h"
 
 static Memory g_mem;
 
 int main() {
-  if(!memRead("challenge.bin", g_mem)) {
+  if(!memRead("../synacor/challenge.bin", g_mem)) {
     printf("Failed to read challenge.bin\n");
     return 1;
   }
